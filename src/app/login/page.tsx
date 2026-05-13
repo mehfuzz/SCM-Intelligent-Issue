@@ -21,8 +21,15 @@ function LoginForm() {
     const supabase = createSupabaseBrowserClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) setError(error.message);
-    else router.push(next);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    // router.refresh() wipes Next's RSC cache so the (app) layout
+    // re-runs getSessionUser() with the new session cookies — otherwise
+    // the Topbar can render with a stale identity from the previous user.
+    router.replace(next);
+    router.refresh();
   }
 
   return (

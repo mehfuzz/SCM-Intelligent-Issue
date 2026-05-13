@@ -8,7 +8,8 @@ export function Topbar({ email }: { email: string }) {
   async function logout() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
-    router.push("/login");
+    router.replace("/login");
+    router.refresh();
   }
   return (
     <header className="flex h-14 items-center justify-between border-b border-airtel-border bg-white px-6">
