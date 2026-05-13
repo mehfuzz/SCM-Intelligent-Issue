@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const ALL_ROLES = [
@@ -26,6 +26,19 @@ export function UsersClient({ initialUsers }: { initialUsers: UserRow[] }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  // Keep local state in sync with server-refreshed prop after router.refresh()
+  useEffect(() => {
+    setUsers(initialUsers);
+  }, [initialUsers]);
+
+  async function reloadFromServer() {
+    const res = await fetch("/api/users", { cache: "no-store" });
+    if (res.ok) {
+      const { data } = await res.json();
+      setUsers(data ?? []);
+    }
+  }
 
   const [form, setForm] = useState({
     email: "",
@@ -63,17 +76,37 @@ export function UsersClient({ initialUsers }: { initialUsers: UserRow[] }) {
       body: JSON.stringify(body)
     });
     setBusy(false);
+    const payload = await res.json().catch(() => ({} as any));
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setErr(j.error ?? "Failed to create user");
+      setErr(payload.error ?? "Failed to create user");
       return;
     }
     setMsg(`User ${form.email} created.`);
+    const snapshot = { ...form };
     setForm({
       email: "", full_name: "", employee_id: "", department: "",
       password: "", send_invite: false, roles: ["submitter"]
     });
     setShowForm(false);
+
+    // Optimistically prepend the new user so it appears immediately,
+    // then reconcile with the server (handles roles populated by triggers).
+    const created = payload.data;
+    if (created?.id) {
+      setUsers((u) => [
+        {
+          id: created.id,
+          email: snapshot.email,
+          full_name: snapshot.full_name,
+          employee_id: snapshot.employee_id || null,
+          department: snapshot.department || null,
+          is_active: true,
+          user_roles: snapshot.roles.map((role) => ({ role }))
+        },
+        ...u.filter((x) => x.id !== created.id)
+      ]);
+    }
+    await reloadFromServer();
     router.refresh();
   }
 
@@ -93,7 +126,10 @@ export function UsersClient({ initialUsers }: { initialUsers: UserRow[] }) {
   async function deactivate(userId: string) {
     if (!confirm("Deactivate this user?")) return;
     const res = await fetch(`/api/users/${userId}`, { method: "DELETE" });
-    if (res.ok) router.refresh();
+    if (res.ok) {
+      setUsers((u) => u.filter((row) => row.id !== userId));
+      router.refresh();
+    }
   }
 
   return (
