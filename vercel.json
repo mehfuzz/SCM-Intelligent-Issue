@@ -9,7 +9,7 @@
   "crons": [
     {
       "path": "/api/sla/scan",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }

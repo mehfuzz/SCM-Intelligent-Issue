@@ -13,7 +13,7 @@ Built as a serverless Next.js App Router project on Vercel with Supabase
 | Database | Supabase Postgres |
 | Auth | Supabase Auth (email/password, SSO-ready) |
 | File storage | Supabase Storage (`ticket-attachments` bucket) |
-| Cron | Vercel Cron → `/api/sla/scan` every 15 min |
+| Cron | Vercel Cron → `/api/sla/scan` daily (Hobby) or every 15 min via external scheduler (see deploy guide) |
 | Theme | Airtel — minimalist white & red |
 
 The AI modules from the BRD (form assistant, deduplication, BRD draft
@@ -159,27 +159,69 @@ Auth callbacks need to know the deployed origin.
 4. Save. If you also use a custom domain, add its origin and
    `*/api/auth/callback` here too.
 
-### Step 9 — Wire the SLA cron secret
+### Step 9 — Wire the SLA cron
 
-The cron in `vercel.json` already calls `/api/sla/scan` every 15
-minutes, but the route requires the `x-cron-secret` header (see
-`src/app/api/sla/scan/route.ts`).
+The cron in `vercel.json` calls `/api/sla/scan` once a day at
+`0 2 * * *` UTC (~7:30 AM IST). The route requires a `x-cron-secret`
+header equal to `CRON_SECRET` (see `src/app/api/sla/scan/route.ts`).
 
-Vercel's built-in cron uses `Authorization: Bearer <CRON_SECRET>`
-instead of a custom header. Pick one of these to keep them aligned:
+**Why daily?** Vercel's **Hobby plan only permits daily cron jobs**
+(`*/15 * * * *` and similar will be rejected with
+*"Hobby accounts are limited to daily cron jobs."*). For Phase 1 a
+once-a-day SLA sweep is acceptable: priority bands of P0/P1/P2/P3 have
+resolution SLAs of 24 h / 7 d / 21 d / 45 d, so a 24 h grain still
+catches every threshold once.
 
-- **Easiest:** change the guard in `route.ts` to accept Vercel's bearer
-  token:
-  ```ts
-  const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) return err("Forbidden", 403);
-  ```
-  Vercel automatically injects this header for cron invocations once
-  `CRON_SECRET` is set.
+If you need 15-minute resolution (which the BRD does suggest), pick one
+of the options below.
 
-- **Or** trigger the scan from an external scheduler (cron-job.org,
-  Upstash QStash, GitHub Actions) and have it POST with the existing
-  `x-cron-secret: $CRON_SECRET` header.
+#### Option A — Vercel Pro ($20/mo)
+Pro unlocks arbitrary cron expressions. Edit `vercel.json` back to
+`*/15 * * * *` and redeploy. **Note:** Vercel Pro cron calls the URL
+with `Authorization: Bearer $CRON_SECRET` (no custom header), so update
+the guard in `src/app/api/sla/scan/route.ts`:
+
+```ts
+const auth = req.headers.get("authorization");
+if (auth !== `Bearer ${process.env.CRON_SECRET}`) return err("Forbidden", 403);
+```
+
+#### Option B — GitHub Actions (free, recommended for Hobby)
+Add `.github/workflows/sla-scan.yml`:
+
+```yaml
+name: SLA scan
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST \
+            -H "x-cron-secret: $CRON_SECRET" \
+            "$APP_URL/api/sla/scan"
+        env:
+          APP_URL:     ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+```
+
+Then in GitHub: **Settings → Secrets and variables → Actions** add
+`APP_URL` (your Vercel URL) and `CRON_SECRET`. No code changes needed —
+this uses the route's existing `x-cron-secret` guard.
+
+#### Option C — Free external scheduler
+[cron-job.org](https://cron-job.org) or
+[Upstash QStash](https://upstash.com/docs/qstash) — point them at
+`POST https://<your-app>/api/sla/scan` with header
+`x-cron-secret: <CRON_SECRET>` on a `*/15 * * * *` schedule.
+
+#### Option D — Supabase `pg_cron`
+Enable the `pg_cron` extension in Supabase and schedule a SQL function
+that calls `/api/sla/scan` via `pg_net`. Most isolated from Vercel but
+requires writing the HTTP-from-Postgres glue.
 
 ### Step 10 — Create the first admin user
 
