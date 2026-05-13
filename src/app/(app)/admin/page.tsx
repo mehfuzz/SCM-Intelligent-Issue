@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUser, hasAnyRole } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -24,7 +25,10 @@ export default async function AdminPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Admin Console</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Admin Console</h1>
+        <Link href="/admin/users" className="btn-primary">Manage users</Link>
+      </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <ListCard title="Modules" rows={(modules ?? []).map((m) => m.name)} />

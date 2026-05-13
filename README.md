@@ -82,6 +82,79 @@ supabase/
 - Add a custom header trigger for the cron by setting
   `CRON_SECRET` and configuring the cron to send `x-cron-secret`.
 
+## Creating the first admin user
+
+Auth is handled by Supabase. New sign-ups land as `submitter` (via the
+`handle_new_user()` trigger). The very first `system_admin` has to be
+promoted manually — after that, the admin can create all other users
+from the UI.
+
+### Option A — Supabase Dashboard (recommended)
+
+1. In your Supabase project, go to **Authentication → Users → Add user**.
+2. Choose **Create new user**, enter the admin email and password, and tick
+   *Auto-confirm user* so they can sign in right away.
+3. Copy the new user's UUID from the table, then open **SQL editor** and
+   run:
+   ```sql
+   -- replace with the actual UUID
+   insert into user_roles (user_id, role)
+   values ('00000000-0000-0000-0000-000000000000', 'system_admin')
+   on conflict do nothing;
+
+   update profiles
+   set full_name = 'SCM Admin', department = 'COE'
+   where id = '00000000-0000-0000-0000-000000000000';
+   ```
+4. Sign in to the portal at `/login` with that email/password. The
+   "Admin" item in the sidebar is now enabled — open **Admin → Manage
+   users** to add the rest of the team.
+
+### Option B — Promote by email (one SQL block)
+
+If you'd rather not look up the UUID:
+
+```sql
+insert into user_roles (user_id, role)
+select id, 'system_admin' from auth.users where email = 'admin@airtel.in'
+on conflict do nothing;
+```
+
+### Option C — Local dev with the Supabase CLI
+
+```bash
+# create the user (password 'ChangeMe123!')
+supabase auth admin create-user --email admin@airtel.in --password 'ChangeMe123!' --confirm
+
+# grant admin role
+psql "$SUPABASE_DB_URL" -c "
+  insert into user_roles (user_id, role)
+  select id, 'system_admin' from auth.users where email='admin@airtel.in'
+  on conflict do nothing;"
+```
+
+### Adding more users (any role) from the UI
+
+Once you're signed in as `system_admin`:
+
+1. Sidebar → **Admin** → **Manage users** → **+ Add user**.
+2. Fill in name, email, department, employee ID.
+3. Pick one or more roles by clicking the pills (any of:
+   `submitter`, `coe_analyst`, `coe_admin`, `poc_owner`, `leadership`,
+   `system_admin`).
+4. Either set an initial password (minimum 8 chars) or tick
+   **Send email invite** to have Supabase send a magic-link.
+5. Submit. The new user can sign in immediately (password flow) or after
+   accepting the invite (magic-link flow). Use the **Edit roles**
+   button in the table to change roles later, or **Deactivate** to
+   disable access without deleting history.
+
+Under the hood this calls `POST /api/users` which uses the Supabase
+service-role key (server-side only) to call
+`auth.admin.createUser` / `inviteUserByEmail`, then writes the profile
+and role rows. Only `system_admin` callers are accepted — the route
+guard rejects everyone else with `403`.
+
 ## Role matrix (per BRD §3.2)
 
 | Role | Capabilities |
@@ -115,6 +188,11 @@ Roles are enforced by Postgres RLS (see `supabase/migrations/0001_init.sql`)
 | `POST` | `/api/tickets/:id/links` | Mark duplicate / related / parent-child |
 | `GET/POST` | `/api/brds` | List / create new BRD version |
 | `PATCH` | `/api/brds/:id` | Edit / submit / approve BRD |
+| `GET` | `/api/users` | List active users (COE+) |
+| `POST` | `/api/users` | Create user + assign roles (admin only) |
+| `PATCH` | `/api/users/:id` | Update profile / reset password (admin only) |
+| `DELETE` | `/api/users/:id` | Deactivate user (admin only) |
+| `PUT` | `/api/users/:id/roles` | Replace user's role set (admin only) |
 | `GET` | `/api/dashboards/{user,coe,leadership}` | Dashboard counts |
 | `GET/PATCH` | `/api/notifications` | List / mark-read |
 | `POST` | `/api/sla/scan` | Cron — fires SLA reminders/escalations/breaches |
