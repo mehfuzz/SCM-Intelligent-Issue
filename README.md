@@ -72,15 +72,146 @@ supabase/
 
 3. `npm install && npm run dev` → http://localhost:3000
 
-## Deploy to Vercel
+## Deploy to Vercel (with Supabase)
 
-- Push to GitHub and import the repo into Vercel.
-- Add the same env vars in the Vercel project settings.
-- Vercel auto-detects Next.js. The `vercel.json` already declares:
-  - 30-s max duration for API routes
-  - cron schedule `*/15 * * * *` hitting `/api/sla/scan`
-- Add a custom header trigger for the cron by setting
-  `CRON_SECRET` and configuring the cron to send `x-cron-secret`.
+End-to-end, ~15 minutes.
+
+### Step 1 — Create the Supabase project
+
+1. Go to https://supabase.com → **New project**.
+2. Choose a region close to Airtel users (e.g. `ap-south-1 / Mumbai`).
+3. Set a strong DB password and save it in a password manager.
+4. Wait ~2 min for provisioning.
+
+### Step 2 — Run the schema and seed
+
+1. In the Supabase project: **SQL editor → + New query**.
+2. Paste the entire contents of `supabase/migrations/0001_init.sql` →
+   **Run**. You should see "Success. No rows returned."
+3. New query → paste `supabase/seed.sql` → **Run**. This populates
+   categories, SLA policies, workflow stages, BRD templates, and
+   example modules.
+
+### Step 3 — Create the storage bucket
+
+1. **Storage → New bucket**.
+2. Name: `ticket-attachments`. Toggle **Public bucket** → ON
+   (or leave private and swap to signed URLs in
+   `src/app/api/tickets/[id]/attachments/route.ts`).
+3. Set file size limit to **25 MB** to match the API guard.
+
+### Step 4 — Collect the Supabase credentials
+
+In **Project Settings → API**, copy:
+
+| Field | Env var |
+|---|---|
+| Project URL | `NEXT_PUBLIC_SUPABASE_URL` |
+| anon / public key | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| service_role key (under "Project API keys") | `SUPABASE_SERVICE_ROLE_KEY` |
+
+Keep `service_role` secret — it bypasses RLS and is used only by
+server-side routes (SLA cron, user creation, audit writes).
+
+### Step 5 — Push the repo to GitHub
+
+```bash
+git remote add origin git@github.com:<your-org>/scm-intelligent-issue.git
+git push -u origin main   # or your default branch
+```
+
+### Step 6 — Import the project in Vercel
+
+1. https://vercel.com/new → **Import Git Repository** → pick the repo.
+2. **Framework Preset**: Next.js (auto-detected).
+3. **Root Directory**: `/` (leave default).
+4. **Build Command / Output**: leave as Vercel defaults
+   (`next build` / `.next`).
+
+### Step 7 — Set environment variables in Vercel
+
+In the import screen (or later in **Project → Settings → Environment Variables**), add the following — make sure each one is enabled for
+**Production**, **Preview**, and **Development**:
+
+```
+NEXT_PUBLIC_SUPABASE_URL        = https://xxxxxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY   = <anon key>
+SUPABASE_SERVICE_ROLE_KEY       = <service_role key>
+NEXT_PUBLIC_APP_URL             = https://<your-project>.vercel.app
+CRON_SECRET                     = <random 32+ char string>
+```
+
+`CRON_SECRET` gates `/api/sla/scan`. Generate one with
+`openssl rand -hex 32`.
+
+Click **Deploy**. First build takes ~2 minutes.
+
+### Step 8 — Tell Supabase about the Vercel URL
+
+Auth callbacks need to know the deployed origin.
+
+1. Supabase → **Authentication → URL configuration**.
+2. **Site URL**: `https://<your-project>.vercel.app`
+3. **Redirect URLs** (add both):
+   - `https://<your-project>.vercel.app/api/auth/callback`
+   - `https://<your-project>.vercel.app/**` (for password-reset, magic
+     link, etc.)
+4. Save. If you also use a custom domain, add its origin and
+   `*/api/auth/callback` here too.
+
+### Step 9 — Wire the SLA cron secret
+
+The cron in `vercel.json` already calls `/api/sla/scan` every 15
+minutes, but the route requires the `x-cron-secret` header (see
+`src/app/api/sla/scan/route.ts`).
+
+Vercel's built-in cron uses `Authorization: Bearer <CRON_SECRET>`
+instead of a custom header. Pick one of these to keep them aligned:
+
+- **Easiest:** change the guard in `route.ts` to accept Vercel's bearer
+  token:
+  ```ts
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) return err("Forbidden", 403);
+  ```
+  Vercel automatically injects this header for cron invocations once
+  `CRON_SECRET` is set.
+
+- **Or** trigger the scan from an external scheduler (cron-job.org,
+  Upstash QStash, GitHub Actions) and have it POST with the existing
+  `x-cron-secret: $CRON_SECRET` header.
+
+### Step 10 — Create the first admin user
+
+Follow **"Creating the first admin user"** below — promote one Supabase
+auth user to `system_admin` via SQL. After that, log in and use
+**Admin → Manage users** to add everyone else.
+
+### Step 11 — Smoke test
+
+- Visit `https://<your-project>.vercel.app/api/health` → returns
+  `{"status":"ok"}`.
+- Sign in at `/login`, raise a test issue, confirm a notification
+  appears under your account, and verify a row landed in `tickets` in
+  the Supabase table editor.
+
+### Branch previews
+
+Every PR you push gets its own preview URL. Add each preview origin
+(or a `*.vercel.app` wildcard) to Supabase **Redirect URLs** so OAuth
+flows still work on previews. The anon key is the same across
+environments; the service-role key only ever lives in Vercel env vars
+(never in client code).
+
+### Pushing schema changes later
+
+Treat `supabase/migrations/*.sql` as the source of truth. For each new
+change:
+
+1. Add a new file `0002_*.sql`.
+2. Run it in Supabase SQL editor (or via `supabase db push` if you set
+   up the Supabase CLI).
+3. Commit; Vercel redeploys automatically.
 
 ## Creating the first admin user
 
