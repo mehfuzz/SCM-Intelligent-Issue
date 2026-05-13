@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Brand } from "@/components/Brand";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") ?? "/dashboard";
@@ -26,6 +26,27 @@ export default function LoginPage() {
   }
 
   return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div>
+        <label className="block text-xs font-medium text-airtel-gray mb-1">Email</label>
+        <input className="input" type="email" value={email}
+          onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-airtel-gray mb-1">Password</label>
+        <input className="input" type="password" value={password}
+          onChange={(e) => setPassword(e.target.value)} required />
+      </div>
+      {error && <p className="text-sm text-airtel-red">{error}</p>}
+      <button type="submit" className="btn-primary w-full" disabled={loading}>
+        {loading ? "Signing in…" : "Sign in"}
+      </button>
+    </form>
+  );
+}
+
+export default function LoginPage() {
+  return (
     <div className="min-h-screen grid place-items-center bg-airtel-surface">
       <div className="w-full max-w-sm card p-8">
         <div className="flex justify-center mb-6">
@@ -35,22 +56,9 @@ export default function LoginPage() {
         <p className="text-sm text-airtel-gray mb-6">
           Use your Airtel SCM credentials to continue.
         </p>
-        <form className="space-y-4" onSubmit={onSubmit}>
-          <div>
-            <label className="block text-xs font-medium text-airtel-gray mb-1">Email</label>
-            <input className="input" type="email" value={email}
-              onChange={(e) => setEmail(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-airtel-gray mb-1">Password</label>
-            <input className="input" type="password" value={password}
-              onChange={(e) => setPassword(e.target.value)} required />
-          </div>
-          {error && <p className="text-sm text-airtel-red">{error}</p>}
-          <button type="submit" className="btn-primary w-full" disabled={loading}>
-            {loading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+        <Suspense fallback={<div className="text-sm text-airtel-gray">Loading…</div>}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   );

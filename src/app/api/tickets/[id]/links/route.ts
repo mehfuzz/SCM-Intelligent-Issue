@@ -42,18 +42,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .single();
   if (error) return err(error.message, 500);
 
-  // If duplicate -> parent linkage, bump duplicate_count on parent
+  // If duplicate -> parent linkage, set parent on child and bump duplicate_count on parent
   if (parsed.data.link_type === "parent_child" || parsed.data.link_type === "duplicate") {
-    await supabase.rpc("noop").catch(() => {}); // placeholder if you add an RPC
     await supabase
       .from("tickets")
       .update({ parent_ticket_id: parsed.data.linked_ticket_id })
       .eq("id", params.id);
     await supabase
       .from("tickets")
-      .update({
-        duplicate_count: 1
-      })
+      .update({ duplicate_count: 1 })
       .eq("id", parsed.data.linked_ticket_id);
   }
 
